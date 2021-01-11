@@ -7,8 +7,7 @@ The program operates on map and scenarios files from [movingai.com/benchmarks/gr
 
 ## Building
 
-`go build pathy.go data.go common.go pathfinding.go mapimage.go loader.go`
-
+Run `go build pathy.go data.go common.go pathfinding.go mapimage.go loader.go` in the code directory.
 [draw2d](https://godoc.org/github.com/llgcode/draw2d) is required to build this project.
 
 ## Use cases
