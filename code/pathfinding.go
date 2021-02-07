@@ -9,31 +9,72 @@ var _ = fmt.Sprint("") // To be able to keep the fmt import
 var SQRT2 = math.Sqrt(2)
 var radToDeg = 180/math.Pi
 
-func StraightLineDist(n1, n2 Node) float64 {
-	dx := math.Abs(float64(n1.X - n2.X))
-	dy := math.Abs(float64(n1.Y - n2.Y))
-	return math.Sqrt(dx*dx + dy*dy)
+var grid       [][]bool
+var open       map[Node]bool // These are maps just for quick membership testing
+var closed     map[Node]bool // These are maps just for quick membership testing
+var g          map[Node]float64
+var f          map[Node]float64
+var parent     map[Node]Node
+var heuristic  func(Node, Node) float64
+var timestamp  map[Node]int // Stores when a node had its f score updated last
+var timestampCounter int
+
+func resetPathfindingStructures() {
+	open      = map[Node]bool{}
+	closed    = map[Node]bool{}
+	parent    = map[Node]Node{}
+	timestamp = map[Node]int{} // Default value 0
+	timestampCounter = 0
+
+	heuristic = func(Node, Node) float64 {
+		panic("Non-initialized heuristic function")
+	}
+
+	g = map[Node]float64{}
+	f = map[Node]float64{}
+	for y := 0; y <= len(grid); y++ {
+		for x := 0; x <= len(grid[0]); x++ {
+			node := NewNode(x, y)
+			g[node] = math.Inf(1)
+			f[node] = math.Inf(1)
+		}
+	}
 }
 
-func octileDistance(from, to Node) float64 {
-	dx := math.Abs(float64(from.X - to.X))
-    dy := math.Abs(float64(from.Y - to.Y))
-    return dx + dy + (SQRT2 - 2) * math.Min(dx, dy)
+func timestampNode(n Node) {
+	timestamp[n] = timestampCounter
+	timestampCounter++
 }
 
-func AStar(m [][]bool, start, goal Node) []Node {
-	return shortestPath(m, start, goal, octileDistance)
+// This function assumes that the nodes are neighbours
+func costToNeighbour(n1, n2 Node) float64 {
+	if n1.X != n2.X && n1.Y != n2.Y {
+		return SQRT2
+	} else {
+		return 1
+	}
 }
 
-func Dijkstra(m [][]bool, start, goal Node) []Node {
-	h := func(current Node, goal Node) float64 {
+func AStar(start, goal Node) []Node {
+	resetPathfindingStructures()
+	heuristic = func(from, to Node) float64 {
+		dx := math.Abs(float64(from.X - to.X))
+		dy := math.Abs(float64(from.Y - to.Y))
+		return dx + dy + (SQRT2 - 2) * math.Min(dx, dy)
+	}
+	return findPath(start, goal)
+}
+
+func Dijkstra(start, goal Node) []Node {
+	resetPathfindingStructures()
+	heuristic = func(current Node, goal Node) float64 {
 		return 0
 	}
-	return shortestPath(m, start, goal, h)
+	return findPath(start, goal)
 }
 
 // Construct the path by starting at the goal and working backwards using the parent map.
-func reconstructPath(parent map[Node]Node, start, goal Node) []Node {
+func reconstructPath(start, goal Node) []Node {
 	node := goal
 	path := []Node{}
 	for node != start {
@@ -59,104 +100,109 @@ func reconstructPath(parent map[Node]Node, start, goal Node) []Node {
 	return reversed
 }
 
-func openNodeWithLowestF(open map[Node]float64, g map[Node]float64) Node {
+func openNodeWithLowestF() Node {
 	var lowestNode Node
 	firstIter := true // used to initialize lowestNode
-	for node, f := range(open) {
+	for node, _ := range(open) {
+		fScore, found := f[node]
+		if !found {
+			continue
+		}
+
 		if firstIter {
 			lowestNode = node
 			firstIter  = false
-		} else {
-			if f <= open[lowestNode] {
-				if f == open[lowestNode] {
-					// break this tie by favouring the node of highest g score
-					if g[node] > g[lowestNode] {
-						lowestNode = node
-					}
-				} else {
-					lowestNode = node
-				}
+			continue
+		}
+
+		if fScore < f[lowestNode] {
+			lowestNode = node
+		} else if fScore == f[lowestNode] {
+			if timestamp[lowestNode] == timestamp[node] {
+				panic("Assertion error: unexpected equal timestamp")
+			}
+			// Break this tie by choosing the node
+			// that was added last (LIFO)
+			if timestamp[lowestNode] > timestamp[node] {
+				lowestNode = node
 			}
 		}
 	}
 	return lowestNode
 }
 
-func ThetaStar(m [][]bool, start, goal Node) []Node {
-	h      := StraightLineDist
-	g      := map[Node]float64{}
-	open   := map[Node]float64{} // Map between node and f score
-	parent := map[Node]Node{}
-
-	for y := 0; y < len(m); y++ {
-		for x := 0; x < len(m[0]); x++ {
-			node := NewNode(x, y)
-			g[node] = math.Inf(1)
-		}
-	}
-	g[start]      = 0
-	open[start]   = g[start] + h(start, goal)
-	parent[start] = start
+func findPath(start, goal Node) []Node {
+	open[start] = true
+	g[start]    = 0
+	f[start]    = g[start] + heuristic(start, goal)
 
 	for len(open) > 0 {
-		node := openNodeWithLowestF(open, g)
-		delete(open, node)
+		node := openNodeWithLowestF()
 		if node == goal {
-			return reconstructPath(parent, start, goal)
+			return reconstructPath(start, goal)
 		}
-		for _, neighbour := range(getTraversableNodes(m, node)) {
-			par := parent[node]
-			if lineOfSight(m, par, neighbour) {
-				/* Path 2 */
-				tentativeG := g[par] + StraightLineDist(par, neighbour)
-				if tentativeG < g[neighbour] {
-					g[neighbour] = tentativeG
-					parent[neighbour] = par
-					open[neighbour] = g[neighbour] + h(neighbour, goal)
-				}
-			} else {
-				/* Path 1 */
-				tentativeG := g[node] + StraightLineDist(node, neighbour)
-				if tentativeG < g[neighbour] {
-					g[neighbour] = tentativeG
-					parent[neighbour] = node
-					open[neighbour] = g[neighbour] + h(neighbour, goal)
-				}
+		for _, neighbour := range(getTraversableNodes(node)) {
+			_, found := closed[node]
+			if found {
+				continue // Closed node
+			}
+			tentativeG := g[node] + costToNeighbour(node, neighbour)
+			if tentativeG < g[neighbour] {
+				parent[neighbour] = node
+				g[neighbour]      = tentativeG
+				f[neighbour]      = g[neighbour] + heuristic(neighbour, goal)
+				open[neighbour]   = true // Value doesn't matter
+				timestampNode(neighbour)
 			}
 		}
+		delete(open, node)
+		closed[node] = true // Value doesn't matter
 	}
 	return []Node{}
 }
 
-func shortestPath(m [][]bool, start, goal Node, h func(Node, Node) float64) []Node {
-	g      := map[Node]float64{}
-	open   := map[Node]float64{} // Map between node and f score
-	parent := map[Node]Node{}
-
-	for y := 0; y < len(m); y++ {
-		for x := 0; x < len(m[0]); x++ {
-			node := NewNode(x, y)
-			g[node] = math.Inf(1)
-		}
-	}
-	g[start]      = 0
-	open[start]   = g[start] + h(start, goal)
-	parent[start] = start
+func ThetaStar(start, goal Node) []Node {
+	resetPathfindingStructures()
+	open[start] = true
+	heuristic   = StraightLineDist
+	g[start]    = 0
+	f[start]    = g[start] + heuristic(start, goal)
 
 	for len(open) > 0 {
-		node := openNodeWithLowestF(open, g)
-		delete(open, node)
+		node := openNodeWithLowestF()
 		if node == goal {
-			return reconstructPath(parent, start, goal)
+			return reconstructPath(start, goal)
 		}
-		for _, neighbour := range(getTraversableNodes(m, node)) {
-			tentativeG := g[node] + StraightLineDist(node, neighbour)
-			if tentativeG < g[neighbour] {
-				parent[neighbour] = node
-				g[neighbour]      = tentativeG
-				open[neighbour]   = g[neighbour] + h(neighbour, goal)
+		for _, neighbour := range(getTraversableNodes(node)) {
+			_, found := closed[node]
+			if found {
+				continue // Closed node
+			}
+			par := parent[node]
+			if lineOfSight(par, neighbour) {
+				/* Path 2 */
+				tentativeG := g[par] + StraightLineDist(par, neighbour)
+				if tentativeG < g[neighbour] {
+					parent[neighbour] = par
+					g[neighbour]      = tentativeG
+					f[neighbour]      = g[neighbour] + heuristic(neighbour, goal)
+					open[neighbour]   = true // Value doesn't matter
+					timestampNode(neighbour)
+				}
+			} else {
+				/* Path 1 */
+				tentativeG := g[node] + costToNeighbour(node, neighbour)
+				if tentativeG < g[neighbour] {
+					parent[neighbour] = node
+					g[neighbour]      = tentativeG
+					f[neighbour]      = g[neighbour] + heuristic(neighbour, goal)
+					open[neighbour]   = true // Value doesn't matter
+					timestampNode(neighbour)
+				}
 			}
 		}
+		delete(open, node)
+		closed[node] = true // Value doesn't matter
 	}
 	return []Node{}
 }
@@ -164,15 +210,19 @@ func shortestPath(m [][]bool, start, goal Node, h func(Node, Node) float64) []No
 /*
  * Nodes outside the map are considered closed.
  */
-func isOpen(m [][]bool, x, y int) bool {
-	w := len(m[0])
-	h := len(m)
+func isOpen(x, y int) bool {
+	w := len(grid[0])
+	h := len(grid)
 	return x >= 0 && x < w &&
 	       y >= 0 && y < h &&
-	       !m[y][x]
+	       !grid[y][x]
 }
 
-func getTraversableNodes(m [][]bool, node Node) []Node {
+// Small bug: If we begin in the corner of an L shape of blocked cells,
+// we will only get diagonal neighbours.
+// Possible solution: get neighbours based on the direction.
+// The direction between node and parent[node] can easily be inferred.
+func getTraversableNodes(node Node) []Node {
     /*
 	Traversal is done between nodes (ie grid edges) and open/closed
 	spaces are entire cells. Because of this difference the figure
@@ -195,10 +245,10 @@ func getTraversableNodes(m [][]bool, node Node) []Node {
 	neighbours := []Node{}
 	x := node.X
 	y := node.Y
-	nwOpen := isOpen(m, x-1, y-1)
-	neOpen := isOpen(m, x,   y-1)
-	seOpen := isOpen(m, x,   y)
-	swOpen := isOpen(m, x-1, y)
+	nwOpen := isOpen(x-1, y-1)
+	neOpen := isOpen(x,   y-1)
+	seOpen := isOpen(x,   y)
+	swOpen := isOpen(x-1, y)
 
 	if nwOpen || neOpen { // We can traverse north
 		neighbours = append(neighbours, NewNode(x, y-1))
@@ -231,14 +281,14 @@ func getTraversableNodes(m [][]bool, node Node) []Node {
 
 // Adapted Bresenham's Line Algorithm from link below
 // https://web.archive.org/web/20190717211246/http://aigamedev.com/open/tutorials/theta-star-any-angle-paths/
-func lineOfSight(m [][]bool, start, end Node) bool {
+func lineOfSight(start, end Node) bool {
 	x0 := start.X
 	y0 := start.Y
 	x1 := end.X
 	y1 := end.Y
 	dx := x1-x0
 	dy := y1-y0
-	f := 0
+	f  := 0
 
 	var sx, sy int
 	if dx < 0 {
@@ -258,16 +308,17 @@ func lineOfSight(m [][]bool, start, end Node) bool {
 		for x0 != x1 {
 			f += dy
 			if f >= dx {
-				if m[y0 + (sy-1)/2][x0 + (sx-1)/2] {
+				if grid[y0 + (sy-1)/2][x0 + (sx-1)/2] {
 					return false
 				}
 				y0 += sy
 				f -= dx
 			}
-			if f != 0 && m[y0 + (sy-1)/2][x0 + (sx-1)/2] {
+			if f != 0 && grid[y0 + (sy-1)/2][x0 + (sx-1)/2] {
 				return false
 			}
-			if dy == 0 && m[y0][x0 + (sx-1)/2] && m[y0-1][x0 + (sx-1)/2] {
+			if y0 == len(grid[0]) || // Otherwise we will go out of bounds
+			   (dy == 0 && grid[y0][x0 + (sx-1)/2] && grid[y0-1][x0 + (sx-1)/2]) {
 				return false
 			}
 			x0 += sx
@@ -276,16 +327,17 @@ func lineOfSight(m [][]bool, start, end Node) bool {
 		for y0 != y1 {
 			f += dx
 			if f >= dy {
-				if m[y0 + (sy-1)/2][x0 + (sx-1)/2] {
+				if grid[y0 + (sy-1)/2][x0 + (sx-1)/2] {
 					return false
 				}
 				x0 += sx
 				f -= dy
 			}
-			if f != 0 && m[y0 + (sy-1)/2][x0 + (sx-1)/2] {
+			if f != 0 && grid[y0 + (sy-1)/2][x0 + (sx-1)/2] {
 				return false
 			}
-			if dx == 0 && m[y0 + (sy-1)/2][x0] && m[y0 + (sy-1)/2][x0-1] {
+			if x0 == len(grid[0]) || // Otherwise we will go out of bounds
+			   (dx == 0 && grid[y0 + (sy-1)/2][x0] && grid[y0 + (sy-1)/2][x0-1]) {
 				return false
 			}
 			y0 += sy
@@ -297,29 +349,15 @@ func lineOfSight(m [][]bool, start, end Node) bool {
 /*
  * A* with post-smoothing
  */
-func AStarPs(m [][]bool, start, goal Node) []Node {
-	path := AStar(m, start, goal)
-
-	if len(path) <= 2 {
-		return path
-	}
-	newPath := []Node{path[0]}
-	firstIter := true
-	for i := 0; i < len(path); i++ {
-		for j := i+1; j < len(path); j++ {
-			los := lineOfSight(m, path[i], path[j])
-			if !los {
-				if firstIter {
-					panic("Assertion failed: LOS broken between the first two path nodes")
-				}
-				newPath = append(newPath, path[j-1])
-				i = j-2
-				break
-			}
-			firstIter = false
+func AStarPs(start, goal Node) []Node {
+	path := AStar(start, goal)
+    smoothPath := []Node{start}
+    for i := 1; i < len(path)-1; i++ {
+		last := smoothPath[len(smoothPath)-1]
+        if !lineOfSight(last, path[i+1]) {
+			smoothPath = append(smoothPath, path[i])
 		}
 	}
-	// Add the goal
-	newPath = append(newPath, path[len(path)-1])
-	return newPath
+	smoothPath = append(smoothPath, goal)
+    return smoothPath
 }

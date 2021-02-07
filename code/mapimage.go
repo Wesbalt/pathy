@@ -15,14 +15,14 @@ import (
  * Creates an image based on a map.
  * White cells are open, black cells are blocked.
  */
-func MakeMapImage(m [][]bool, scale int) *image.RGBA {
-	h := len(m)
-	w := len(m[0])
+func MakeMapImage(scale int) *image.RGBA {
+	h := len(grid)
+	w := len(grid[0])
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			c := color.White
-			if m[y][x] {
+			if grid[y][x] {
 				c = color.Black
 			}
 			img.Set(x, y, c)

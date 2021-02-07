@@ -110,11 +110,11 @@ func LoadScenarios(path string) ([]Scenario, error) {
  * Only the '.' and '@' characters are accepted.
  */
 func LoadMap(path string) ([][]bool, error) {
-	m := [][]bool{}
+	grid := [][]bool{}
 
 	file, err := os.Open(path)
     if err != nil {
-		return m, errors.New("Could not open the file")
+		return grid, errors.New("Could not open the file")
     }
     defer file.Close()
 
@@ -124,7 +124,7 @@ func LoadMap(path string) ([][]bool, error) {
 	line := scanner.Text()
 	if line != "type octile" {
 		msg := fmt.Sprintf("Bad first line \"%s\"", line)
-		return m, errors.New(msg)
+		return grid, errors.New(msg)
 	}
 
 	scanner.Scan()
@@ -132,12 +132,12 @@ func LoadMap(path string) ([][]bool, error) {
 	splits := strings.Split(line, " ")
 	if len(splits) != 2 || splits[0] != "height" {
 		msg := fmt.Sprintf("Bad second line \"%s\"", line)
-		return m, errors.New(msg)
+		return grid, errors.New(msg)
 	}
 	height, err := strconv.Atoi(splits[1])
 	if err != nil {
 		msg := fmt.Sprintf("Non-int height \"%s\"", splits[1])
-		return m, errors.New(msg)
+		return grid, errors.New(msg)
 	}
 	
 	scanner.Scan()
@@ -145,24 +145,24 @@ func LoadMap(path string) ([][]bool, error) {
 	splits = strings.Split(line, " ")
 	if len(splits) != 2 || splits[0] != "width" {
 		msg := fmt.Sprintf("Bad third line \"%s\"", line)
-		return m, errors.New(msg)
+		return grid, errors.New(msg)
 	}
 	width, err := strconv.Atoi(splits[1])
 	if err != nil {
 		msg := fmt.Sprintf("Non-int width \"%s\"", splits[1])
-		return m, errors.New(msg)
+		return grid, errors.New(msg)
 	}
 
 	scanner.Scan()
 	line = scanner.Text()
 	if line != "map" {
 		msg := fmt.Sprintf("Bad fourth line \"%s\"", line)
-		return m, errors.New(msg)
+		return grid, errors.New(msg)
 	}
 
-	m = make([][]bool, height)
+	grid = make([][]bool, height)
 	for row := 0; row < height; row++ {
-		m[row] = make([]bool, width)
+		grid[row] = make([]bool, width)
     }
 
 	row := 0
@@ -186,14 +186,14 @@ func LoadMap(path string) ([][]bool, error) {
 					break
 				default:
 					msg := fmt.Sprintf("Bad rune '%c' on line %d", r, lineNumber)
-					return m, errors.New(msg)
+					return grid, errors.New(msg)
 			}
-			m[row][i] = b
+			grid[row][i] = b
 		}
 		row++
     }
 	if height != row {
 		panic("Height mismatch in map file")
 	}
-	return m, nil
+	return grid, nil
 }

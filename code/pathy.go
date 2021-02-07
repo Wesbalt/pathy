@@ -3,9 +3,11 @@ package main
 import (
 	"fmt"
 	"os"
-	// "io/ioutil"
 	"strings"
 	"path/filepath"
+	"strconv"
+	"time"
+	"math"
 )
 
 type PathyMode int
@@ -22,7 +24,7 @@ type PathyParameters struct {
 	InPath   string
 	OutPath  string
 	Scale    int
-	Algo     func([][]bool, Node, Node) []Node
+	Algo     func(Node, Node) []Node
 	N        int
 	Trials   int
 	StartX, StartY, GoalX, GoalY int
@@ -159,12 +161,13 @@ func runDrawMode(p PathyParameters) {
 	if p.Mode != Draw {
 		panic("Assertion failed: unexpected mode")
 	}
-	m, err := LoadMap(p.InPath)
+	var err error
+	grid, err = LoadMap(p.InPath)
 	if err != nil {
 		fmt.Printf("Error reading file \"%s\": %s\n", p.InPath, err.Error())
 		os.Exit(1)
 	}
-	img := MakeMapImage(m, p.Scale)
+	img := MakeMapImage(p.Scale)
 	err  = SaveImage(img, p.OutPath)
 	if err != nil {
 		fmt.Printf("Error writing image \"%s\": %s\n", p.OutPath, err.Error())
@@ -176,7 +179,8 @@ func runSingleMode(p PathyParameters) {
 	if p.Mode != BenchSingle && p.Mode != BenchAndDrawSingle {
 		panic("Assertion failed: unexpected mode")
 	}
-	m, err := LoadMap(p.InPath)
+	var err error
+	grid, err = LoadMap(p.InPath)
 	if err != nil {
 		fmt.Printf("Error reading file \"%s\": %s\n", p.InPath, err.Error())
 		os.Exit(1)
@@ -184,11 +188,11 @@ func runSingleMode(p PathyParameters) {
 
 	start := NewNode(p.StartX, p.StartY)
 	goal  := NewNode(p.GoalX,  p.GoalY)
-	path, turns, pathLen, avgAngle, avgRuntime := testOneScenario(start, goal, m, p.Algo, p.Trials)
+	path, turns, pathLen, avgAngle, avgRuntime := testOneScenario(start, goal, p.Algo, p.Trials)
 	fmt.Printf("Stats: %d turn(s), length %.1f, avg angle %.1f rad (%.1f deg), runtime %dms\n", turns, pathLen, avgAngle, avgAngle*radToDeg, avgRuntime)
 
 	if p.Mode == BenchAndDrawSingle {
-		img := MakeMapImage(m, p.Scale)
+		img := MakeMapImage(p.Scale)
 		img  = DrawPath(img, path, p.Scale)
 		err  = SaveImage(img, p.OutPath)
 		if err != nil {
@@ -211,7 +215,7 @@ func runMultipleMode(p PathyParameters) {
 	}
 	// Load map
 	mapPath := filepath.Join(filepath.Dir(p.InPath), scenarios[0].MapName)
-	m, err := LoadMap(mapPath)
+	grid, err = LoadMap(mapPath)
 	if err != nil {
 		fmt.Printf("Error reading map file \"%s\": %s\n", mapPath, err.Error())
 		os.Exit(1)
@@ -261,7 +265,7 @@ func runMultipleMode(p PathyParameters) {
 		sx, sy, gx, gy := scenario.Start.X, scenario.Start.Y, scenario.Goal.X, scenario.Goal.Y
 		start := NewNode(sx,sy)
 		goal  := NewNode(gx,gy)
-		path, turns, pathLen, avgAngle, avgRuntime := testOneScenario(start, goal, m, p.Algo, p.Trials)
+		path, turns, pathLen, avgAngle, avgRuntime := testOneScenario(start, goal, p.Algo, p.Trials)
 		fmt.Printf("(%d,%d) -> (%d,%d) stats: %d turn(s), length %.1f, avg angle %.1f rad (%.1f deg), runtime %dms\n", sx, sy, gx, gy, turns, pathLen, avgAngle, avgAngle*radToDeg, avgRuntime)
 
 		sumTurnCount  += float64(turns)
@@ -276,7 +280,7 @@ func runMultipleMode(p PathyParameters) {
 			fname  = fmt.Sprintf("%s_%d_%d_%d_%d.jpg", fname, sx, sy, gx, gy)
 			out   := filepath.Join(p.OutPath, fname)
 
-			img := MakeMapImage(m, p.Scale)
+			img := MakeMapImage(p.Scale)
 			img  = DrawPath(img, path, p.Scale)
 			err  = SaveImage(img, out)
 			if err != nil {
@@ -294,123 +298,88 @@ func runMultipleMode(p PathyParameters) {
 	fmt.Printf("\nAvg stats: %f turn(s), length %f, avg angle %f rad (%.1f deg), runtime %dms\n", overallTurnCount, overallPathLen, overallAvgAngle, overallAvgAngle*radToDeg, overallAvgRuntime)
 }
 
-/*func oldmain() {
-	if len(os.Args) != 5 {
-		fmt.Println("Wrong number of arguments!")
-		fmt.Printf("Usage: %s INPUT ALGORITHM N TRIALS\n", os.Args[0])
-		fmt.Println("Algorithms: \"dijkstra\" \"astar\" \"astar-ps\" \"thetastar\"")
-		os.Exit(1)
+/*
+ * Performs test runs of the scenario. Returns the following things:
+ * turn count
+ * path length
+ * average angle of turns (radians)
+ * average runtime (ms)
+ */
+func testOneScenario(start, goal Node, algo func (start, goal Node) []Node, trials int) ([]Node, int, float64, float64, int) {
+	var path []Node
+
+	// Get path and average runtime
+	totalRuntime := 0.0
+	for i := 0; i < trials; i++ {
+		before  := time.Now()
+		path     = algo(start, goal)
+		after   := time.Now()
+		elapsed := after.Sub(before)
+		totalRuntime += float64(elapsed.Milliseconds())
+	}
+	avgRuntime := int(math.Round(totalRuntime/float64(trials)))
+
+	// Calculate path length
+	pathLen := 0.0
+	for i := 0; i < len(path)-1; i++ {
+		n1 := path[i]
+		n2 := path[i+1]
+		pathLen += StraightLineDist(n1, n2)
 	}
 
-	scenariosPath := os.Args[1]
-	algoName := os.Args[2]
-	algo     := MustParsePathfindingFunction(algoName)
-	n        := MustParseInt(os.Args[3]) // Use this to select every nth scenario per file
-	if n <= 0 {
-		fmt.Println("Argument n must be a positive integer.")
-		os.Exit(1)
-	}
-	trials := MustParseInt(os.Args[4]) // Number of times a scenario is to be repeated
-	if trials <= 0 {
-		fmt.Println("Trials must be a positive integer.")
-		os.Exit(1)
+	// Calculate turn count and average angle of turns
+	turns    := 0
+	avgAngle := 0.0
+	for i := 0; i < len(path)-2; i++ {
+		n1 := path[i]
+		n2 := path[i+1]
+		n3 := path[i+2]
+		// There are two vectors (n1,n2) and (n2,n3)
+		v1_x, v1_y := float64(n2.X - n1.X), float64(n2.Y - n1.Y)
+		v2_x, v2_y := float64(n3.X - n2.X), float64(n3.Y - n2.Y)
+		dot    := v1_x * v2_x + v1_y * v2_y
+		v1_len := math.Sqrt(v1_x * v1_x + v1_y * v1_y)
+		v2_len := math.Sqrt(v2_x * v2_x + v2_y * v2_y)
+		a := dot / (v1_len * v2_len)
+		a  = math.Max(-1, math.Min(1, a)) // Rounding errors may produce values outside [-1,1] so clamp it.
+		angle := math.Acos(a)
+		if angle >= 0.001 {
+			// We are turning at node n1
+			avgAngle += angle
+			turns++
+		}
 	}
 
-	// Load and store scenarios
-	scenarios, err := LoadScenarios(scenariosPath)
+	if turns > 0 {
+		avgAngle /= float64(turns)
+	}
+
+	return path, turns, pathLen, avgAngle, avgRuntime
+}
+
+func MustParsePathfindingFunction(algoName string) func(Node, Node) []Node {
+	switch strings.ToLower(algoName) {
+		case "dijkstra":
+			return Dijkstra
+		case "astar":
+			return AStar
+		case "astar-ps":
+			return AStarPs
+		case "thetastar":
+			return ThetaStar
+		// case "ap-thetastar":
+			// return true, ApThetaStar
+	}
+	fmt.Printf("Unknown algorithm \"%s\"\n", algoName)
+	os.Exit(1)
+	return func( Node, Node) []Node { return []Node{} }
+}
+
+func MustParseInt(arg string) int {
+	n, err := strconv.Atoi(arg)
 	if err != nil {
-		msg := fmt.Sprintf("Error loading scenarios file \"%s\": %s", scenariosPath, err.Error())
-		fmt.Println(msg)
+		fmt.Printf("Non-int argument \"%s\"\n", arg)
 		os.Exit(1)
 	}
-	// Select n evenly spread out scenarios
-	{
-		inc := 1.0
-		expectedIterations := len(scenarios)
-		if n <= 1 {
-			inc = float64(len(scenarios))
-			expectedIterations = 1
-		} else if n < len(scenarios) {
-			inc = float64(len(scenarios)-1) / float64(n-1)
-			expectedIterations = n
-		}
-		iterations := 0
-		for i := 0.0; i < float64(len(scenarios)); i += inc {
-			index := int(i)
-			loadedScenarios = append(loadedScenarios, scenarios[index])
-			iterations++
-		}
-		// Assertions
-		if iterations != expectedIterations {
-			msg := fmt.Sprintf("Unexpected number of picked scenarios (expected %d, got %d)\n", expectedIterations, iterations)
-			panic(msg)
-		}
-	}
-	fmt.Printf("Loaded %d scenario(s).\n", len(loadedScenarios))
-	if len(loadedScenarios) == 0 {
-		fmt.Println("Done.")
-		os.Exit(0)
-	}
-
-	// Execute scenarios, loading new maps if the current scenario calls for it
-	var mapName string
-	m := [][]bool{}
-	sumTurnCount  := 0.0
-	sumPathLen    := 0.0
-	sumAvgAngle   := 0.0
-	sumAvgRuntime := 0
-	for _, scenario := range loadedScenarios {
-		scenariosPath := filepath.Join(path, scenario.Path)
-
-		// Load the map if it's new
-		if mapName != scenario.MapName {
-			mapName = scenario.MapName
-			fmt.Printf("Loading map file \"%s\"...\n", mapName)
-			mapPath := filepath.Join(path, mapName)
-			var err error
-			m, err = LoadMap(mapPath)
-			if err != nil {
-				msg := fmt.Sprintf("Error loading map file \"%s\": %s", mapPath, err.Error())	
-				fmt.Println(msg)
-				os.Exit(1)
-			}
-		}
-
-		// Assert that the map size of the scenarios file and its corresponding map match
-		if len(m) != scenario.Height || len(m[0]) != scenario.Width {
-			msg := fmt.Sprintf("Assertion failed: scenarios file \"%s\" refers to a different sized map", scenariosPath)
-			panic(msg)
-		}
-
-		turns, pathLen, avgAngle, avgRuntime := testOneScenario(scenario.Start, scenario.Goal, m, algo, trials)
-		sumTurnCount  += float64(turns)
-		sumPathLen    += pathLen
-		sumAvgAngle   += avgAngle
-		sumAvgRuntime += avgRuntime
-		
-		fmt.Printf("    %s:%d (%d,%d) -> (%d,%d) tested.\n", scenariosPath, scenario.Bucket, scenario.Start.X, scenario.Start.Y, scenario.Goal.X, scenario.Goal.Y)
-
-		if true {
-			path := algo(m, scenario.Start, scenario.Goal)
-			img  := DrawPath(MakeMapImage(m), path)
-			out  := fmt.Sprintf("%s_%d_%d_%d_%d.jpg", strings.Split(scenario.MapName, ".")[0], scenario.Start.X, scenario.Start.Y, scenario.Goal.X, scenario.Goal.Y)
-			err  := SaveImage(img, out)
-			if err != nil {
-				fmt.Printf("Error writing image \"%s\": %s\n", out, err.Error())
-				os.Exit(1)
-			}
-		}
-
-	}
-	fmt.Printf("Ran %d scenario(s).\n", len(loadedScenarios))
-
-	// Stats are the average across all selected scenarios
-	testCount := float64(len(loadedScenarios))
-	overallTurnCount  := sumTurnCount  / testCount
-	overallPathLen    := sumPathLen    / testCount
-	overallAvgAngle   := sumAvgAngle   / testCount
-	overallAvgRuntime := sumAvgRuntime / int(testCount)
-	fmt.Printf("Average stats: %f turn(s), length %f, average angle %f rad (%.1f deg), runtime %dms\n", overallTurnCount, overallPathLen, overallAvgAngle, overallAvgAngle*radToDeg, overallAvgRuntime)
-
-	fmt.Println("Done.")
-}*/
+	return n
+}
