@@ -178,8 +178,8 @@ func ThetaStar(start, goal Node) []Node {
 			if found {
 				continue // Closed node
 			}
-			par := parent[node]
-			if lineOfSight(par, neighbour) {
+			par, hasParent := parent[node]
+			if hasParent && lineOfSight(par, neighbour) {
 				/* Path 2 */
 				tentativeG := g[par] + StraightLineDist(par, neighbour)
 				if tentativeG < g[neighbour] {
