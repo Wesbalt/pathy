@@ -2,7 +2,7 @@
 
 ![](./maps_with_paths.png)
 
-A tool for visualization and benchmarking of pathfinding algorithms (Dijkstra, A, Post-Smoothed A* and Theta*).
+A tool for visualization and benchmarking of grid pathfinding algorithms (Dijkstra, A, Post-Smoothed A* and Theta*).
 The program operates on map and scenarios files from [movingai.com/benchmarks/grids.html](https://www.movingai.com/benchmarks/grids.html), some of which are available in the `maps` directory.
 
 ## Building
